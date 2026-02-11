@@ -18,7 +18,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/health`);
+      const res = await fetch(`/api/health`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as Health;
       setHealth(data);
