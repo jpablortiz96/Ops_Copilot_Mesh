@@ -1,6 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.health import router as health_router
+from app.routes.sop import router as sop_router
+from app.routes.upload import router as upload_router
+from dotenv import load_dotenv
+from app.routes.reindex import router as reindex_router
+
+load_dotenv()
 
 app = FastAPI(
     title="Ops Copilot Mesh API",
@@ -22,3 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(health_router, tags=["health"])
+app.include_router(sop_router, tags=["sop"])
+
+app.include_router(upload_router)
+app.include_router(reindex_router)

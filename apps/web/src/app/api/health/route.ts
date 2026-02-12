@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const base = process.env.API_BASE_URL;
-  if (!base) {
-    return NextResponse.json(
-      { ok: false, error: "API_BASE_URL is not set" },
-      { status: 500 }
-    );
+  const apiBase = process.env.API_BASE_URL;
+  if (!apiBase) {
+    return NextResponse.json({ ok: false, error: "API_BASE_URL missing" }, { status: 500 });
   }
 
-  const url = `${base.replace(/\/$/, "")}/health`;
-  const res = await fetch(url, { cache: "no-store" });
-  const data = await res.json();
+  const r = await fetch(`${apiBase}/health`, { cache: "no-store" });
+  const text = await r.text();
 
-  return NextResponse.json(data, { status: res.status });
+  return new NextResponse(text, {
+    status: r.status,
+    headers: { "Content-Type": r.headers.get("content-type") ?? "application/json" },
+  });
 }
