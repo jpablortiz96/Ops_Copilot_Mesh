@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 from app.routes.health import router as health_router
 from app.routes.sop import router as sop_router
 from app.routes.upload import router as upload_router
@@ -8,15 +9,35 @@ from app.routes.reindex import router as reindex_router
 from app.routes.actions import router as actions_router
 from app.routes.audit import router as audit_router
 
+_ENV_HINTS = {
+    "local",
+    "dev",
+    "development",
+    "test",
+}
 
-load_dotenv()
+_CLOUD_ENV_MARKERS = (
+    "CONTAINER_APP_NAME",
+    "CONTAINER_APP_REVISION",
+    "K_SERVICE",
+)
+
+
+def _running_in_cloud() -> bool:
+    return any(bool(os.getenv(marker, "").strip()) for marker in _CLOUD_ENV_MARKERS)
+
+
+_app_env = os.getenv("APP_ENV", "").strip().lower()
+if _app_env in _ENV_HINTS or (not _app_env and not _running_in_cloud()):
+    # Local/dev convenience: load values from apps/api/.env when present.
+    load_dotenv()
 
 app = FastAPI(
     title="Ops Copilot Mesh API",
     version="0.1.0"
 )
 
-# ✅ CORS: allow only known dev origins (enterprise-friendly)
+# CORS: allow only known dev origins (enterprise-friendly)
 allowed_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -37,4 +58,3 @@ app.include_router(upload_router)
 app.include_router(reindex_router)
 app.include_router(actions_router)
 app.include_router(audit_router)
-
