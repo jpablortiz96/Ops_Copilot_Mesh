@@ -47,7 +47,7 @@ function Ensure-ContainerSecrets {
     param(
         [Parameter(Mandatory = $true)][string]$AppName,
         [Parameter(Mandatory = $true)][string]$RG,
-        [Parameter(Mandatory = $true)][string[]]$Secrets
+        [string[]]$Secrets = @()
     )
 
     if ($Secrets.Count -eq 0) {
