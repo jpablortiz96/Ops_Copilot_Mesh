@@ -22,7 +22,7 @@ def _env(name: str) -> str:
 def _resolve_config() -> Tuple[str, str, str]:
     endpoint = _env("AZURE_SEARCH_ENDPOINT").rstrip("/")
     key = _env("AZURE_SEARCH_KEY")
-    index = os.getenv("AZURE_SEARCH_INDEX", "").strip() or "opsmesh-sops"
+    index = os.getenv("AZURE_SEARCH_INDEX", "").strip() or "ops-sop"
     return endpoint, key, index
 
 
