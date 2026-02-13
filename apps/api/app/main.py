@@ -5,6 +5,9 @@ from app.routes.sop import router as sop_router
 from app.routes.upload import router as upload_router
 from dotenv import load_dotenv
 from app.routes.reindex import router as reindex_router
+from app.routes.actions import router as actions_router
+from app.routes.audit import router as audit_router
+
 
 load_dotenv()
 
@@ -32,3 +35,6 @@ app.include_router(sop_router, tags=["sop"])
 
 app.include_router(upload_router)
 app.include_router(reindex_router)
+app.include_router(actions_router)
+app.include_router(audit_router)
+
