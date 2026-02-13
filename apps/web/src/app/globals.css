@@ -171,6 +171,10 @@ body {
   border-color: rgba(251,113,133,.35);
   background: rgba(251,113,133,.12);
 }
+.statusWarn{
+  border-color: rgba(250,204,21,.35);
+  background: rgba(250,204,21,.12);
+}
 
 .pillrow{ display:flex; flex-wrap:wrap; gap: 8px; margin: 10px 0 0; }
 .pill{
@@ -221,6 +225,11 @@ body {
   border-radius: 14px;
   padding: 12px;
   background: rgba(0,0,0,.16);
+}
+.proposalActions{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .proposalSection h3{
   margin: 0 0 8px;

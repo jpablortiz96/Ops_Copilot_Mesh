@@ -5,14 +5,12 @@ import { forwardJson } from "../../_lib/proxy";
 
 export const runtime = "nodejs";
 
-const proposeSchema = z.object({
-  incident: z.string().trim().min(1, "incident is required").max(2000, "incident is too long"),
-  role: z.enum(["operator", "admin"]).default("operator"),
-  top: z.number().int().min(1).max(20).default(5),
+const executeSchema = z.object({
+  actionId: z.string().trim().min(1, "actionId is required"),
+  executorRole: z.string().trim().min(1, "executorRole is required").default("operator"),
 });
 
 export async function POST(req: NextRequest) {
-
   let payloadRaw: unknown;
   try {
     payloadRaw = await req.json();
@@ -20,7 +18,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const parsed = proposeSchema.safeParse(payloadRaw);
+  const parsed = executeSchema.safeParse(payloadRaw);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Request validation failed", issues: parsed.error.flatten() },
@@ -28,5 +26,5 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return forwardJson({ method: "POST", upstreamPath: "/v1/actions/propose", body: parsed.data });
+  return forwardJson({ method: "POST", upstreamPath: "/v1/actions/execute", body: parsed.data });
 }

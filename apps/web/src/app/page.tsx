@@ -13,7 +13,7 @@ type SopResult = {
 
 type Health = { ok?: boolean; service?: string; error?: string };
 
-type ActionRole = "operator" | "admin";
+type ActionRole = "operator" | "admin" | "manager" | "sre-lead";
 
 type ActionEvidence = {
   id: string;
@@ -37,16 +37,47 @@ type ActionGate = {
   allowedToAutoExecute?: boolean;
 };
 
+type ActionApproval = {
+  decision?: "APPROVE" | "REJECT";
+  approverRole?: string;
+  note?: string | null;
+  ts?: string;
+};
+
+type ActionExecution = {
+  executorRole?: string;
+  mode?: string;
+  result?: {
+    ok: boolean;
+    actionId: string;
+    status: string;
+    startedAt: string;
+    finishedAt: string;
+    stepsExecuted: string[];
+  };
+};
+
 type ActionProposal = {
   id: string;
   status: string;
   createdAt: string;
+  updatedAt?: string;
   requesterRole: string;
   category: string;
   incident: string;
   plan: ActionPlan;
   gate: ActionGate;
   evidence: ActionEvidence[];
+  warnings?: string[];
+  approval?: ActionApproval;
+  execution?: ActionExecution;
+};
+
+type AuditEvent = {
+  id: string;
+  type: string;
+  ts: string;
+  payload: Record<string, unknown>;
 };
 
 type ApiError = {
@@ -73,13 +104,20 @@ function formatUtc(dateIso: string) {
   return date.toLocaleString();
 }
 
+function extractErrorMessage(payload: unknown, fallback: string): string {
+  const err = safeJson<ApiError>(payload);
+  return err?.error ?? err?.detail ?? fallback;
+}
+
 export default function Home() {
   const [query, setQuery] = useState("inventory negative");
   const [results, setResults] = useState<SopResult[]>([]);
   const [status, setStatus] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   const [onlyUploaded, setOnlyUploaded] = useState(true);
-  const [busy, setBusy] = useState<"upload" | "reindex" | "search" | "propose" | "none">("none");
+  const [busy, setBusy] = useState<
+    "upload" | "reindex" | "search" | "propose" | "approve" | "execute" | "none"
+  >("none");
   const [health, setHealth] = useState<Health>({});
   const [top, setTop] = useState(5);
 
@@ -88,6 +126,10 @@ export default function Home() {
   const [triageTop, setTriageTop] = useState(5);
   const [actionData, setActionData] = useState<ActionProposal | null>(null);
   const [actionError, setActionError] = useState("");
+  const [auditItems, setAuditItems] = useState<AuditEvent[]>([]);
+
+  const roleCanApprove = role === "manager" || role === "sre-lead";
+  const canExecute = actionData ? actionData.status === "APPROVED" || actionData.status === "READY" : false;
 
   useEffect(() => {
     (async () => {
@@ -99,6 +141,7 @@ export default function Home() {
         setHealth({ ok: false, error: "Health check failed" });
       }
     })();
+    void refreshAudit();
   }, []);
 
   const visibleResults = useMemo(() => {
@@ -110,6 +153,30 @@ export default function Home() {
       return (b.score ?? 0) - (a.score ?? 0);
     });
   }, [results, onlyUploaded]);
+
+  async function refreshAudit() {
+    try {
+      const r = await fetch("/api/audit/recent?limit=20", { cache: "no-store" });
+      const data = await r.json();
+      if (!r.ok) return;
+      setAuditItems(Array.isArray(data?.items) ? (data.items as AuditEvent[]) : []);
+    } catch {
+      // Ignore transient audit fetch failures to keep UI responsive.
+    }
+  }
+
+  async function refreshAction(actionId: string) {
+    const r = await fetch(`/api/actions/${encodeURIComponent(actionId)}`, { cache: "no-store" });
+    const payload = (await r.json()) as unknown;
+    if (!r.ok) {
+      throw new Error(extractErrorMessage(payload, `Action refresh failed (${r.status})`));
+    }
+    const action = safeJson<ActionProposal>(payload);
+    if (!action) {
+      throw new Error("Unexpected action payload");
+    }
+    setActionData(action);
+  }
 
   const search = async () => {
     setBusy("search");
@@ -194,9 +261,8 @@ export default function Home() {
 
       const payload = (await r.json()) as unknown;
       if (!r.ok) {
-        const err = safeJson<ApiError>(payload);
         setActionData(null);
-        setActionError(err?.error ?? err?.detail ?? `Request failed (${r.status})`);
+        setActionError(extractErrorMessage(payload, `Request failed (${r.status})`));
         return;
       }
 
@@ -208,9 +274,68 @@ export default function Home() {
       }
 
       setActionData(proposed);
+      await refreshAudit();
     } catch {
       setActionData(null);
       setActionError("Actions request failed");
+    } finally {
+      setBusy("none");
+    }
+  };
+
+  const decideAction = async (decision: "APPROVE" | "REJECT") => {
+    if (!actionData) return;
+    setBusy("approve");
+    setActionError("");
+
+    try {
+      const r = await fetch("/api/actions/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actionId: actionData.id, approverRole: role, decision }),
+      });
+      const payload = (await r.json()) as unknown;
+      if (!r.ok) {
+        setActionError(extractErrorMessage(payload, `Decision failed (${r.status})`));
+        return;
+      }
+
+      const updated = safeJson<ActionProposal>(payload);
+      if (!updated || !updated.id) {
+        setActionError("Unexpected approval payload");
+        return;
+      }
+
+      setActionData(updated);
+      await refreshAudit();
+    } catch {
+      setActionError("Approval request failed");
+    } finally {
+      setBusy("none");
+    }
+  };
+
+  const executeAction = async () => {
+    if (!actionData) return;
+    setBusy("execute");
+    setActionError("");
+
+    try {
+      const r = await fetch("/api/actions/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actionId: actionData.id, executorRole: role }),
+      });
+      const payload = (await r.json()) as unknown;
+      if (!r.ok) {
+        setActionError(extractErrorMessage(payload, `Execution failed (${r.status})`));
+        return;
+      }
+
+      await refreshAction(actionData.id);
+      await refreshAudit();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Execution request failed");
     } finally {
       setBusy("none");
     }
@@ -223,7 +348,7 @@ export default function Home() {
           <div>
             <h1 className="ocm__title">Ops Copilot Mesh</h1>
             <p className="ocm__subtitle">
-              Upload SOPs, index enterprise knowledge, and propose incident actions with gate checks.
+              Incident to action loop: evidence-backed proposals, human approval, and simulated execution.
             </p>
           </div>
 
@@ -243,9 +368,13 @@ export default function Home() {
           <div className="sep" />
           <div className="step">2) Reindex</div>
           <div className="sep" />
-          <div className="step">3) Search</div>
+          <div className="step">3) Propose</div>
           <div className="sep" />
-          <div className={`step ${actionData ? "done" : ""}`}>4) Propose Actions</div>
+          <div className={`step ${actionData?.status === "APPROVED" || actionData?.status === "READY" ? "done" : ""}`}>
+            4) Approve
+          </div>
+          <div className="sep" />
+          <div className={`step ${actionData?.status === "EXECUTED_SIMULATED" ? "done" : ""}`}>5) Execute</div>
         </section>
 
         <div className="ocm__grid">
@@ -285,7 +414,7 @@ export default function Home() {
               <div className="card__head">
                 <div>
                   <h2 className="card__title">Incident Triage</h2>
-                  <p className="card__desc">Send incident context and receive a governed action proposal.</p>
+                  <p className="card__desc">Create an action proposal with gate checks and evidence.</p>
                 </div>
               </div>
 
@@ -306,14 +435,11 @@ export default function Home() {
                   <label className="fieldLabel" htmlFor="role">
                     Role
                   </label>
-                  <select
-                    id="role"
-                    className="ocm__select"
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as ActionRole)}
-                  >
+                  <select id="role" className="ocm__select" value={role} onChange={(e) => setRole(e.target.value as ActionRole)}>
                     <option value="operator">operator</option>
                     <option value="admin">admin</option>
+                    <option value="manager">manager</option>
+                    <option value="sre-lead">sre-lead</option>
                   </select>
                 </div>
 
@@ -339,9 +465,7 @@ export default function Home() {
 
               {actionError && <div className="status statusError">{actionError}</div>}
             </div>
-          </div>
 
-          <div className="ocm__col">
             <div className="card">
               <div className="card__head">
                 <div>
@@ -373,8 +497,34 @@ export default function Home() {
               </div>
 
               {status && <div className="status">{status}</div>}
-            </div>
 
+              {visibleResults.length === 0 ? (
+                <div className="empty">No search results yet.</div>
+              ) : (
+                <div className="list">
+                  {visibleResults.map((r) => (
+                    <div key={r.id} className="item">
+                      <div className="item__top">
+                        <div className="item__title">{r.title}</div>
+                        <div className={`tag ${isBlob(r.source) ? "blob" : "demo"}`}>
+                          {isBlob(r.source) ? "UPLOADED" : "DEMO"}
+                        </div>
+                      </div>
+
+                      <div className="meta">
+                        <span>score={Number(r.score ?? 0).toFixed(3)}</span>
+                        <span className="sepDot">|</span>
+                        <span className="mono">{r.source}</span>
+                      </div>
+                      <pre className="snippet">{r.snippet}</pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="ocm__col">
             <div className="card">
               <div className="card__head">
                 <h2 className="card__title">Action Proposal</h2>
@@ -401,6 +551,10 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {Array.isArray(actionData.warnings) && actionData.warnings.length > 0 && (
+                    <div className="status statusWarn">{actionData.warnings.join(" | ")}</div>
+                  )}
+
                   <div className="proposalSection">
                     <h3>Plan</h3>
                     <div className="planMeta">
@@ -418,6 +572,30 @@ export default function Home() {
                     ) : (
                       <div className="empty">No plan steps returned.</div>
                     )}
+                  </div>
+
+                  <div className="proposalActions">
+                    {roleCanApprove && (
+                      <>
+                        <button
+                          className="ocm__btn primary"
+                          onClick={() => void decideAction("APPROVE")}
+                          disabled={busy !== "none" || actionData.status !== "PENDING_APPROVAL"}
+                        >
+                          {busy === "approve" ? "Applying..." : "Approve"}
+                        </button>
+                        <button
+                          className="ocm__btn"
+                          onClick={() => void decideAction("REJECT")}
+                          disabled={busy !== "none" || actionData.status === "EXECUTED_SIMULATED"}
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+                    <button className="ocm__btn" onClick={() => void executeAction()} disabled={busy !== "none" || !canExecute}>
+                      {busy === "execute" ? "Executing..." : "Execute (simulated)"}
+                    </button>
                   </div>
 
                   <div className="proposalSection">
@@ -451,29 +629,20 @@ export default function Home() {
 
             <div className="card">
               <div className="card__head">
-                <h2 className="card__title">Search Results</h2>
+                <h2 className="card__title">Audit Timeline</h2>
               </div>
 
-              {visibleResults.length === 0 ? (
-                <div className="empty">No results yet. Upload, reindex, and run search.</div>
+              {auditItems.length === 0 ? (
+                <div className="empty">No audit events yet.</div>
               ) : (
                 <div className="list">
-                  {visibleResults.map((r) => (
-                    <div key={r.id} className="item">
+                  {auditItems.map((event) => (
+                    <div key={event.id} className="item">
                       <div className="item__top">
-                        <div className="item__title">{r.title}</div>
-                        <div className={`tag ${isBlob(r.source) ? "blob" : "demo"}`}>
-                          {isBlob(r.source) ? "UPLOADED" : "DEMO"}
-                        </div>
+                        <div className="item__title">{event.type}</div>
+                        <div className="tag">{formatUtc(event.ts)}</div>
                       </div>
-
-                      <div className="meta">
-                        <span>score={Number(r.score ?? 0).toFixed(3)}</span>
-                        <span className="sepDot">|</span>
-                        <span className="mono">{r.source}</span>
-                      </div>
-
-                      <pre className="snippet">{r.snippet}</pre>
+                      <pre className="snippet">{JSON.stringify(event.payload, null, 2)}</pre>
                     </div>
                   ))}
                 </div>
@@ -483,7 +652,7 @@ export default function Home() {
         </div>
 
         <footer className="ocm__footer">
-          Incident response control plane with SOP evidence, action plans, and approval gates.
+          Human-in-the-loop ops control plane with evidence, approvals, simulated execution, and audit trail.
         </footer>
       </div>
     </main>
