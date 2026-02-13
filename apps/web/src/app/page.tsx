@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type Result = {
+type SopResult = {
   id: string;
   title: string;
   source: string;
@@ -13,19 +13,81 @@ type Result = {
 
 type Health = { ok?: boolean; service?: string; error?: string };
 
+type ActionRole = "operator" | "admin";
+
+type ActionEvidence = {
+  id: string;
+  title: string;
+  domain: string;
+  source: string;
+  score: number;
+  snippet: string;
+};
+
+type ActionPlan = {
+  summary?: string;
+  risk?: string;
+  requiresApproval?: boolean;
+  steps?: string[];
+};
+
+type ActionGate = {
+  requiredRole?: string;
+  requesterRole?: string;
+  allowedToAutoExecute?: boolean;
+};
+
+type ActionProposal = {
+  id: string;
+  status: string;
+  createdAt: string;
+  requesterRole: string;
+  category: string;
+  incident: string;
+  plan: ActionPlan;
+  gate: ActionGate;
+  evidence: ActionEvidence[];
+};
+
+type ApiError = {
+  error?: string;
+  detail?: string;
+};
+
 function isBlob(source: string) {
   return source?.startsWith("blob:");
 }
 
+function safeJson<T>(value: unknown): T | null {
+  if (value && typeof value === "object") {
+    return value as T;
+  }
+  return null;
+}
+
+function formatUtc(dateIso: string) {
+  const date = new Date(dateIso);
+  if (Number.isNaN(date.getTime())) {
+    return dateIso;
+  }
+  return date.toLocaleString();
+}
+
 export default function Home() {
   const [query, setQuery] = useState("inventory negative");
-  const [results, setResults] = useState<Result[]>([]);
+  const [results, setResults] = useState<SopResult[]>([]);
   const [status, setStatus] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   const [onlyUploaded, setOnlyUploaded] = useState(true);
-  const [busy, setBusy] = useState<"upload" | "reindex" | "search" | "none">("none");
+  const [busy, setBusy] = useState<"upload" | "reindex" | "search" | "propose" | "none">("none");
   const [health, setHealth] = useState<Health>({});
   const [top, setTop] = useState(5);
+
+  const [incident, setIncident] = useState("Users report 500 errors after deployment");
+  const [role, setRole] = useState<ActionRole>("operator");
+  const [triageTop, setTriageTop] = useState(5);
+  const [actionData, setActionData] = useState<ActionProposal | null>(null);
+  const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -33,7 +95,7 @@ export default function Home() {
         const r = await fetch("/api/health", { cache: "no-store" });
         const data = (await r.json()) as Health;
         setHealth(data);
-      } catch (e: any) {
+      } catch {
         setHealth({ ok: false, error: "Health check failed" });
       }
     })();
@@ -41,7 +103,6 @@ export default function Home() {
 
   const visibleResults = useMemo(() => {
     const filtered = onlyUploaded ? results.filter((r) => isBlob(r.source)) : results;
-    // Siempre ordenamos: uploaded primero, luego score desc
     return [...filtered].sort((a, b) => {
       const ab = isBlob(a.source) ? 0 : 1;
       const bb = isBlob(b.source) ? 0 : 1;
@@ -52,7 +113,7 @@ export default function Home() {
 
   const search = async () => {
     setBusy("search");
-    setStatus("Searching...");
+    setStatus("Searching SOPs...");
     try {
       const r = await fetch("/api/sop/search", {
         method: "POST",
@@ -60,10 +121,11 @@ export default function Home() {
         body: JSON.stringify({ query, top }),
       });
       const data = await r.json();
-      setResults(data.results ?? []);
-      setStatus("Done ✅");
+      const list = Array.isArray(data?.results) ? (data.results as SopResult[]) : [];
+      setResults(list);
+      setStatus(r.ok ? "Search completed" : "Search completed with upstream error");
     } catch {
-      setStatus("Search failed ❌");
+      setStatus("Search failed");
     } finally {
       setBusy("none");
     }
@@ -71,20 +133,24 @@ export default function Home() {
 
   const upload = async () => {
     if (!file) {
-      setStatus("Pick a file first ⚠️");
+      setStatus("Select a file before upload");
       return;
     }
+
     setBusy("upload");
     setStatus("Uploading SOP...");
     try {
       const fd = new FormData();
       fd.append("file", file);
-
       const r = await fetch("/api/sop/upload", { method: "POST", body: fd });
       const data = await r.json();
-      setStatus(`Uploaded ✅ ${data.path ?? ""}`);
+      if (!r.ok) {
+        setStatus(`Upload failed (${r.status})`);
+        return;
+      }
+      setStatus(`Upload completed: ${data.path ?? "unknown path"}`);
     } catch {
-      setStatus("Upload failed ❌");
+      setStatus("Upload failed");
     } finally {
       setBusy("none");
     }
@@ -92,13 +158,59 @@ export default function Home() {
 
   const reindex = async () => {
     setBusy("reindex");
-    setStatus("Reindexing...");
+    setStatus("Reindexing index...");
     try {
       const r = await fetch("/api/sop/reindex", { method: "POST" });
       const data = await r.json();
-      setStatus(`Reindexed ✅ indexed=${data.indexed ?? "?"}`);
+      if (!r.ok) {
+        setStatus(`Reindex failed (${r.status})`);
+        return;
+      }
+      setStatus(`Reindex completed: indexed=${data.indexed ?? "?"}`);
     } catch {
-      setStatus("Reindex failed ❌");
+      setStatus("Reindex failed");
+    } finally {
+      setBusy("none");
+    }
+  };
+
+  const proposeActions = async () => {
+    setBusy("propose");
+    setActionError("");
+
+    const cleanedIncident = incident.trim();
+    if (!cleanedIncident) {
+      setActionError("Incident is required");
+      setBusy("none");
+      return;
+    }
+
+    try {
+      const r = await fetch("/api/actions/propose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ incident: cleanedIncident, role, top: triageTop }),
+      });
+
+      const payload = (await r.json()) as unknown;
+      if (!r.ok) {
+        const err = safeJson<ApiError>(payload);
+        setActionData(null);
+        setActionError(err?.error ?? err?.detail ?? `Request failed (${r.status})`);
+        return;
+      }
+
+      const proposed = safeJson<ActionProposal>(payload);
+      if (!proposed || !proposed.id) {
+        setActionData(null);
+        setActionError("Unexpected payload from actions API");
+        return;
+      }
+
+      setActionData(proposed);
+    } catch {
+      setActionData(null);
+      setActionError("Actions request failed");
     } finally {
       setBusy("none");
     }
@@ -111,13 +223,14 @@ export default function Home() {
           <div>
             <h1 className="ocm__title">Ops Copilot Mesh</h1>
             <p className="ocm__subtitle">
-              Enterprise runbook intelligence: Upload SOPs → Reindex → Search with evidence (Blob + Azure AI Search)
+              Upload SOPs, index enterprise knowledge, and propose incident actions with gate checks.
             </p>
           </div>
 
           <div className="ocm__right">
             <div className={`ocm__badge ${health.ok ? "ok" : "bad"}`}>
-              <span className="dot" /> {health.ok ? "API Connected" : "API Not reachable"}
+              <span className="dot" />
+              {health.ok ? "API connected" : "API unavailable"}
             </div>
             <button className="ocm__btn" onClick={() => location.reload()}>
               Refresh
@@ -132,17 +245,16 @@ export default function Home() {
           <div className="sep" />
           <div className="step">3) Search</div>
           <div className="sep" />
-          <div className="step muted">4) Approve Actions (next)</div>
+          <div className={`step ${actionData ? "done" : ""}`}>4) Propose Actions</div>
         </section>
 
         <div className="ocm__grid">
-          {/* Left column */}
           <div className="ocm__col">
             <div className="card">
               <div className="card__head">
                 <div>
                   <h2 className="card__title">Upload SOP / Policy</h2>
-                  <p className="card__desc">Upload a Markdown SOP to Azure Blob Storage.</p>
+                  <p className="card__desc">Upload Markdown or text SOP files to Azure Blob Storage.</p>
                 </div>
               </div>
 
@@ -154,8 +266,8 @@ export default function Home() {
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 />
                 <div className="drop__box">
-                  <div className="drop__title">{file ? file.name : "Click to choose a .md file"}</div>
-                  <div className="drop__hint">Tip: judges love “upload → real indexing → evidence” demos.</div>
+                  <div className="drop__title">{file ? file.name : "Choose a .md or .txt file"}</div>
+                  <div className="drop__hint">Uploaded files become searchable after reindex.</div>
                 </div>
               </label>
 
@@ -172,40 +284,72 @@ export default function Home() {
             <div className="card">
               <div className="card__head">
                 <div>
-                  <h2 className="card__title">Governance & HITL (next)</h2>
-                  <p className="card__desc">
-                    Next milestone: role-based approvals + audit log (Operator/Supervisor/Manager).
-                  </p>
+                  <h2 className="card__title">Incident Triage</h2>
+                  <p className="card__desc">Send incident context and receive a governed action proposal.</p>
                 </div>
               </div>
 
-              <div className="pillrow">
-                <span className="pill">Agent Framework</span>
-                <span className="pill">MCP Tools</span>
-                <span className="pill">Audit</span>
-                <span className="pill">App Insights</span>
+              <label className="fieldLabel" htmlFor="incident">
+                Incident
+              </label>
+              <textarea
+                id="incident"
+                className="ocm__textarea"
+                value={incident}
+                onChange={(e) => setIncident(e.target.value)}
+                rows={4}
+                placeholder="Describe the production incident"
+              />
+
+              <div className="row triageRow">
+                <div className="field">
+                  <label className="fieldLabel" htmlFor="role">
+                    Role
+                  </label>
+                  <select
+                    id="role"
+                    className="ocm__select"
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as ActionRole)}
+                  >
+                    <option value="operator">operator</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label className="fieldLabel" htmlFor="triageTop">
+                    Top K
+                  </label>
+                  <input
+                    id="triageTop"
+                    className="ocm__input"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={triageTop}
+                    onChange={(e) => setTriageTop(Math.min(20, Math.max(1, Number(e.target.value) || 1)))}
+                  />
+                </div>
               </div>
 
-              <div className="mutedBox">
-                We’ll add multi-agent orchestration + safe actions after UI polish.
-              </div>
+              <button className="ocm__btn primary triageBtn" onClick={proposeActions} disabled={busy !== "none"}>
+                {busy === "propose" ? "Proposing..." : "Propose actions"}
+              </button>
+
+              {actionError && <div className="status statusError">{actionError}</div>}
             </div>
           </div>
 
-          {/* Right column */}
           <div className="ocm__col">
             <div className="card">
               <div className="card__head">
                 <div>
                   <h2 className="card__title">Search SOPs with Evidence</h2>
-                  <p className="card__desc">Retrieve relevant SOP steps with citations (source + score).</p>
+                  <p className="card__desc">Retrieve relevant SOP snippets with citation metadata.</p>
                 </div>
                 <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={onlyUploaded}
-                    onChange={(e) => setOnlyUploaded(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={onlyUploaded} onChange={(e) => setOnlyUploaded(e.target.checked)} />
                   <span>Only uploaded</span>
                 </label>
               </div>
@@ -215,7 +359,7 @@ export default function Home() {
                   className="ocm__input"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="e.g., inventory negative, duplicate orders, access denied..."
+                  placeholder="inventory negative, duplicate orders, access denied"
                 />
                 <button className="ocm__btn primary" onClick={search} disabled={busy !== "none"}>
                   {busy === "search" ? "Searching..." : "Search"}
@@ -224,31 +368,94 @@ export default function Home() {
 
               <div className="row small">
                 <span className="label">Top</span>
-                <input
-                  type="range"
-                  min={1}
-                  max={10}
-                  value={top}
-                  onChange={(e) => setTop(parseInt(e.target.value, 10))}
-                />
+                <input type="range" min={1} max={10} value={top} onChange={(e) => setTop(Number(e.target.value))} />
                 <span className="label">{top}</span>
               </div>
 
-              {status && (
-                <div className="status">
-                  <span className={`statusDot ${status.includes("❌") ? "bad" : "ok"}`} />
-                  {status}
+              {status && <div className="status">{status}</div>}
+            </div>
+
+            <div className="card">
+              <div className="card__head">
+                <h2 className="card__title">Action Proposal</h2>
+              </div>
+
+              {!actionData ? (
+                <div className="empty">No action proposal yet. Submit an incident to run triage.</div>
+              ) : (
+                <div className="proposal">
+                  <div className="proposalHead">
+                    <span className="pill strong">{actionData.status}</span>
+                    <span className="pill">{actionData.category}</span>
+                    <span className="pill">gate: {actionData.gate.requiredRole ?? "n/a"}</span>
+                  </div>
+
+                  <div className="proposalMeta">
+                    <div>
+                      <span className="metaLabel">Action ID:</span>
+                      <span className="mono">{actionData.id}</span>
+                    </div>
+                    <div>
+                      <span className="metaLabel">Created:</span>
+                      <span>{formatUtc(actionData.createdAt)}</span>
+                    </div>
+                  </div>
+
+                  <div className="proposalSection">
+                    <h3>Plan</h3>
+                    <div className="planMeta">
+                      <span>risk: {actionData.plan.risk ?? "unknown"}</span>
+                      <span>requiresApproval: {String(Boolean(actionData.plan.requiresApproval))}</span>
+                      <span>allowedToAutoExecute: {String(Boolean(actionData.gate.allowedToAutoExecute))}</span>
+                    </div>
+
+                    {Array.isArray(actionData.plan.steps) && actionData.plan.steps.length > 0 ? (
+                      <ol className="planList">
+                        {actionData.plan.steps.map((step, index) => (
+                          <li key={`${index}-${step}`}>{step}</li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <div className="empty">No plan steps returned.</div>
+                    )}
+                  </div>
+
+                  <div className="proposalSection">
+                    <h3>Evidence</h3>
+                    {Array.isArray(actionData.evidence) && actionData.evidence.length > 0 ? (
+                      <div className="list">
+                        {actionData.evidence.map((item) => (
+                          <div key={item.id} className="item">
+                            <div className="item__top">
+                              <div className="item__title">{item.title || item.id}</div>
+                              <div className={`tag ${isBlob(item.source) ? "blob" : "demo"}`}>
+                                {isBlob(item.source) ? "UPLOADED" : "INDEXED"}
+                              </div>
+                            </div>
+                            <div className="meta">
+                              <span>score={Number(item.score ?? 0).toFixed(3)}</span>
+                              <span className="sepDot">|</span>
+                              <span className="mono">{item.source}</span>
+                            </div>
+                            <pre className="snippet">{item.snippet}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty">No evidence returned.</div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
 
             <div className="card">
               <div className="card__head">
-                <h2 className="card__title">Results</h2>
+                <h2 className="card__title">Search Results</h2>
               </div>
 
               {visibleResults.length === 0 ? (
-                <div className="empty">No results yet. Upload + Reindex + Search.</div>
+                <div className="empty">No results yet. Upload, reindex, and run search.</div>
               ) : (
                 <div className="list">
                   {visibleResults.map((r) => (
@@ -261,8 +468,8 @@ export default function Home() {
                       </div>
 
                       <div className="meta">
-                        <span>score={r.score.toFixed(3)}</span>
-                        <span className="sepDot">•</span>
+                        <span>score={Number(r.score ?? 0).toFixed(3)}</span>
+                        <span className="sepDot">|</span>
                         <span className="mono">{r.source}</span>
                       </div>
 
@@ -276,7 +483,7 @@ export default function Home() {
         </div>
 
         <footer className="ocm__footer">
-          Built for AI Dev Days Hackathon • Next: Multi-agent orchestration (Agent Framework) + MCP tools + Audit/HITL.
+          Incident response control plane with SOP evidence, action plans, and approval gates.
         </footer>
       </div>
     </main>

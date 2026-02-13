@@ -22,7 +22,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), "Avenir Next", "Segoe UI", sans-serif;
 }
 /* Ops Copilot Mesh UI */
 .ocm{
@@ -82,6 +82,14 @@ body {
 .row{ display:flex; gap: 10px; align-items:center; }
 .row.small{ margin-top: 10px; }
 .label{ font-size: 12px; color: rgba(255,255,255,.65); }
+.field{ flex: 1; }
+.fieldLabel{
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  letter-spacing: .2px;
+  color: rgba(255,255,255,.70);
+}
 
 .ocm__input{
   flex:1;
@@ -93,6 +101,30 @@ body {
   outline: none;
 }
 .ocm__input:focus{ border-color: rgba(103,190,217,.55); box-shadow: 0 0 0 3px rgba(103,190,217,.18); }
+.ocm__textarea{
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(0,0,0,.25);
+  color: rgba(255,255,255,.92);
+  outline: none;
+}
+.ocm__textarea:focus{ border-color: rgba(103,190,217,.55); box-shadow: 0 0 0 3px rgba(103,190,217,.18); }
+.ocm__select{
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(0,0,0,.25);
+  color: rgba(255,255,255,.92);
+  outline: none;
+}
+.ocm__select:focus{ border-color: rgba(103,190,217,.55); box-shadow: 0 0 0 3px rgba(103,190,217,.18); }
+.triageRow{ margin-top: 12px; }
+.triageBtn{ margin-top: 14px; }
 
 .ocm__btn{
   padding: 10px 12px;
@@ -135,6 +167,10 @@ body {
 .statusDot{ width: 10px; height: 10px; border-radius: 99px; background:#94a3b8; }
 .statusDot.ok{ background:#2dd4bf; }
 .statusDot.bad{ background:#fb7185; }
+.statusError{
+  border-color: rgba(251,113,133,.35);
+  background: rgba(251,113,133,.12);
+}
 
 .pillrow{ display:flex; flex-wrap:wrap; gap: 8px; margin: 10px 0 0; }
 .pill{
@@ -144,6 +180,11 @@ body {
   background: rgba(255,255,255,.06);
   font-size: 12px;
   color: rgba(255,255,255,.78);
+}
+.pill.strong{
+  border-color: rgba(103,190,217,.38);
+  background: rgba(103,190,217,.18);
+  color: rgba(255,255,255,.95);
 }
 .mutedBox{
   margin-top: 10px;
@@ -157,6 +198,50 @@ body {
 
 .empty{ padding: 14px; color: rgba(255,255,255,.70); }
 .list{ display:flex; flex-direction:column; gap: 12px; }
+.proposal{ display: flex; flex-direction: column; gap: 12px; }
+.proposalHead{ display:flex; gap: 8px; flex-wrap: wrap; }
+.proposalMeta{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  font-size: 13px;
+}
+.proposalMeta > div{
+  display:flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.metaLabel{
+  color: rgba(255,255,255,.68);
+  font-size: 12px;
+}
+.proposalSection{
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0,0,0,.16);
+}
+.proposalSection h3{
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.planMeta{
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: rgba(255,255,255,.72);
+}
+.planList{
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.35;
+}
 .item{
   padding: 12px;
   border-radius: 16px;
