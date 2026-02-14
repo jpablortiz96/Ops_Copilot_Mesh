@@ -109,6 +109,41 @@ Use this payload for all actions triage checks:
 $payload = @{ incident="Users report 500 errors after deployment"; role="operator"; top=5 } | ConvertTo-Json -Compress
 ```
 
+### Hackathon Demo Smoke Test
+
+Neutral incident examples:
+- `Users report intermittent 500 errors after deployment`
+- `API latency spike above 2s in one region`
+- `Authentication failures increased for admin users`
+- `Database connection pool exhausted in checkout service`
+
+Local closed-loop smoke:
+
+```powershell
+$payload = @{ incident="API latency spike above 2s in one region"; role="operator"; top=5 } | ConvertTo-Json -Compress
+$proposed = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/actions/propose" -ContentType "application/json" -Body $payload
+$actionId = $proposed.id
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/actions/approve" -ContentType "application/json" -Body (@{ actionId=$actionId; approverRole="manager"; decision="APPROVE"; note="demo" } | ConvertTo-Json -Compress) | ConvertTo-Json -Depth 12
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/actions/execute" -ContentType "application/json" -Body (@{ actionId=$actionId; executorRole="operator" } | ConvertTo-Json -Compress) | ConvertTo-Json -Depth 12
+Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/v1/audit/recent?actionId=$actionId&limit=50" | ConvertTo-Json -Depth 12
+```
+
+Azure closed-loop smoke:
+
+```powershell
+$RG="rg-ops-copilot-mesh"
+$API_APP="api-ops-copilot-mesh"
+$WEB_APP="web-ops-copilot-mesh"
+$API_FQDN = az containerapp show -n $API_APP -g $RG --query "properties.configuration.ingress.fqdn" -o tsv
+$WEB_FQDN = az containerapp show -n $WEB_APP -g $RG --query "properties.configuration.ingress.fqdn" -o tsv
+
+$payload = @{ incident="Authentication failures increased for admin users"; role="operator"; top=5 } | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method Post -Uri "https://$API_FQDN/v1/actions/propose" -ContentType "application/json" -Body $payload | ConvertTo-Json -Depth 12
+Invoke-RestMethod -Method Post -Uri "https://$WEB_FQDN/api/actions/propose" -ContentType "application/json" -Body $payload | ConvertTo-Json -Depth 12
+```
+
 ### 1) Local API direct call
 
 ```powershell

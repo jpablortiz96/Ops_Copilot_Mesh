@@ -1,66 +1,53 @@
 # Ops Copilot Mesh Demo Script (2 Minutes)
 
-## Goal
-Show a full closed loop:
-1. Evidence-backed action proposal.
-2. Human approval gate.
-3. Simulated execution.
-4. Audit trail.
+## Open These URLs
+- Local Web UI: `http://localhost:3000`
+- Local API docs: `http://127.0.0.1:8000/docs`
+- Azure Web UI: `https://<WEB_FQDN>`
+- Azure API docs: `https://<API_FQDN>/docs`
 
-## Preconditions
-- API running at `http://127.0.0.1:8000`.
-- WEB running at `http://localhost:3000`.
-- API has `AZURE_SEARCH_ENDPOINT`, `AZURE_SEARCH_KEY`, `AZURE_SEARCH_INDEX=ops-sop`, `AZURE_STORAGE_CONNECTION_STRING`.
+## Neutral Incident Examples
+- `Users report intermittent 500 errors after deployment`
+- `API latency spike above 2s in one region`
+- `Authentication failures increased for admin users`
+- `Database connection pool exhausted in checkout service`
 
-## Live Script
+## Judge Narrative (Copy/Paste)
+1. "We ingest SOPs and operational runbooks, then retrieve evidence snippets with source citations."
+2. "Given an incident, the system proposes a plan, scores risk, and runs a decision gate."
+3. "If approval is required, a human approves/rejects. Execution is simulated for safety."
+4. "Every step is written to an audit timeline: proposed, approved/rejected, executed."
 
-### 1) Show service health (10s)
+## Live Commands (Local API)
 ```powershell
-Invoke-RestMethod "http://127.0.0.1:8000/health" | ConvertTo-Json
-```
+$incident = "Users report intermittent 500 errors after deployment"
+$payload = @{ incident=$incident; role="operator"; top=5 } | ConvertTo-Json -Compress
 
-### 2) Show evidence retrieval from SOP search (20s)
-```powershell
-$searchBody = @{ query="negative inventory"; top=3 } | ConvertTo-Json -Compress
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/sop/search" -ContentType "application/json" -Body $searchBody | ConvertTo-Json -Depth 8
-```
-
-### 3) Propose action from an incident (30s)
-```powershell
-$payload = @{ incident="Users report 500 errors after deployment"; role="operator"; top=5 } | ConvertTo-Json -Compress
 $proposed = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/actions/propose" -ContentType "application/json" -Body $payload
 $proposed | ConvertTo-Json -Depth 10
 $actionId = $proposed.id
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/actions/approve" -ContentType "application/json" -Body (@{ actionId=$actionId; approverRole="manager"; decision="APPROVE"; note="judge demo" } | ConvertTo-Json -Compress) | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/actions/execute" -ContentType "application/json" -Body (@{ actionId=$actionId; executorRole="operator" } | ConvertTo-Json -Compress) | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/v1/audit/recent?actionId=$actionId&limit=50" | ConvertTo-Json -Depth 10
 ```
 
-Expected talking points:
-- `evidence` contains SOP snippets and sources.
-- `plan` contains risk + steps.
-- `gate` explains whether approval is required and why.
-
-### 4) Human in the loop approval (20s)
+## Azure Commands (API + Web Proxy)
 ```powershell
-$approve = @{ actionId=$actionId; approverRole="manager"; decision="APPROVE"; note="approved for demo" } | ConvertTo-Json -Compress
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/actions/approve" -ContentType "application/json" -Body $approve | ConvertTo-Json -Depth 10
+$RG="rg-ops-copilot-mesh"
+$API_APP="api-ops-copilot-mesh"
+$WEB_APP="web-ops-copilot-mesh"
+$API_FQDN = az containerapp show -n $API_APP -g $RG --query "properties.configuration.ingress.fqdn" -o tsv
+$WEB_FQDN = az containerapp show -n $WEB_APP -g $RG --query "properties.configuration.ingress.fqdn" -o tsv
+
+$incident = "API latency spike above 2s in one region"
+$payload = @{ incident=$incident; role="operator"; top=5 } | ConvertTo-Json -Compress
+
+# API direct
+$proposedApi = Invoke-RestMethod -Method Post -Uri "https://$API_FQDN/v1/actions/propose" -ContentType "application/json" -Body $payload
+$proposedApi | ConvertTo-Json -Depth 10
+
+# Web proxy
+$proposedWeb = Invoke-RestMethod -Method Post -Uri "https://$WEB_FQDN/api/actions/propose" -ContentType "application/json" -Body $payload
+$proposedWeb | ConvertTo-Json -Depth 10
 ```
-
-### 5) Execute (simulated) (20s)
-```powershell
-$exec = @{ actionId=$actionId; executorRole="operator" } | ConvertTo-Json -Compress
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/actions/execute" -ContentType "application/json" -Body $exec | ConvertTo-Json -Depth 10
-```
-
-### 6) Show audit timeline (20s)
-```powershell
-Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/v1/audit/recent?limit=20" | ConvertTo-Json -Depth 10
-```
-
-Expected events:
-- `action.proposed`
-- `action.approved`
-- `action.executed`
-
-## Optional Azure Demo (same flow)
-Replace local URLs with:
-- API: `https://<API_FQDN>/v1/actions/*`
-- WEB proxy: `https://<WEB_FQDN>/api/actions/*`

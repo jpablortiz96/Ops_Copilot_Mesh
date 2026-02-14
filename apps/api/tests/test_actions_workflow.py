@@ -70,7 +70,7 @@ class ActionsWorkflowTests(unittest.TestCase):
         audit_recent = self.client.get("/v1/audit/recent?limit=20")
         self.assertEqual(audit_recent.status_code, 200, audit_recent.text)
         items = audit_recent.json()["items"]
-        event_types = {item["type"] for item in items}
+        event_types = {item["event"] for item in items}
         self.assertIn("action.proposed", event_types)
         self.assertIn("action.approved", event_types)
         self.assertIn("action.executed", event_types)

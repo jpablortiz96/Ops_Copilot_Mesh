@@ -76,10 +76,15 @@ type ActionProposal = {
 };
 
 type AuditEvent = {
-  id: string;
-  type: string;
   ts: string;
-  payload: Record<string, unknown>;
+  event: string;
+  actionId?: string | null;
+  data: Record<string, unknown>;
+};
+
+type AuditEnvelope = {
+  items?: AuditEvent[];
+  count?: number;
 };
 
 type ApiError = {
@@ -117,14 +122,27 @@ function riskPillClass(risk: string | undefined): string {
   return "pill";
 }
 
+function isSimulatedStatus(status: string | undefined): boolean {
+  return typeof status === "string" && status.toUpperCase().includes("SIMULATED");
+}
+
+function buildAuditUrl(actionId?: string): string {
+  const params = new URLSearchParams();
+  params.set("limit", "20");
+  if (actionId) {
+    params.set("actionId", actionId);
+  }
+  return `/api/audit/recent?${params.toString()}`;
+}
+
 export default function Home() {
-  const [query, setQuery] = useState("inventory negative");
+  const [query, setQuery] = useState("service 500 errors");
   const [results, setResults] = useState<SopResult[]>([]);
   const [status, setStatus] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   const [onlyUploaded, setOnlyUploaded] = useState(true);
   const [busy, setBusy] = useState<
-    "upload" | "reindex" | "search" | "propose" | "approve" | "execute" | "none"
+    "upload" | "reindex" | "search" | "propose" | "approve" | "execute" | "refresh" | "none"
   >("none");
   const [health, setHealth] = useState<Health>({});
   const [top, setTop] = useState(5);
@@ -138,6 +156,8 @@ export default function Home() {
 
   const roleCanApprove = role === "manager" || role === "sre-lead";
   const canExecute = actionData ? actionData.status === "APPROVED" || actionData.status === "READY" : false;
+  const isSimulatedExecution =
+    isSimulatedStatus(actionData?.status) || isSimulatedStatus(actionData?.execution?.result?.status);
 
   useEffect(() => {
     (async () => {
@@ -162,10 +182,10 @@ export default function Home() {
     });
   }, [results, onlyUploaded]);
 
-  async function refreshAudit() {
+  async function refreshAudit(actionId?: string) {
     try {
-      const r = await fetch("/api/audit/recent?limit=20", { cache: "no-store" });
-      const data = await r.json();
+      const r = await fetch(buildAuditUrl(actionId), { cache: "no-store" });
+      const data = (await r.json()) as AuditEnvelope;
       if (!r.ok) return;
       setAuditItems(Array.isArray(data?.items) ? (data.items as AuditEvent[]) : []);
     } catch {
@@ -185,6 +205,20 @@ export default function Home() {
     }
     setActionData(action);
   }
+
+  const refreshCurrentAction = async () => {
+    if (!actionData) return;
+    setBusy("refresh");
+    setActionError("");
+    try {
+      await refreshAction(actionData.id);
+      await refreshAudit(actionData.id);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Action refresh failed");
+    } finally {
+      setBusy("none");
+    }
+  };
 
   const search = async () => {
     setBusy("search");
@@ -282,7 +316,7 @@ export default function Home() {
       }
 
       setActionData(proposed);
-      await refreshAudit();
+      await refreshAudit(proposed.id);
     } catch {
       setActionData(null);
       setActionError("Actions request failed");
@@ -315,7 +349,7 @@ export default function Home() {
       }
 
       setActionData(updated);
-      await refreshAudit();
+      await refreshAudit(updated.id);
     } catch {
       setActionError("Approval request failed");
     } finally {
@@ -341,7 +375,7 @@ export default function Home() {
       }
 
       await refreshAction(actionData.id);
-      await refreshAudit();
+      await refreshAudit(actionData.id);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Execution request failed");
     } finally {
@@ -491,7 +525,7 @@ export default function Home() {
                   className="ocm__input"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="inventory negative, duplicate orders, access denied"
+                  placeholder="500 errors, latency spike, auth failures, db connection exhaustion"
                 />
                 <button className="ocm__btn primary" onClick={search} disabled={busy !== "none"}>
                   {busy === "search" ? "Searching..." : "Search"}
@@ -562,6 +596,9 @@ export default function Home() {
 
                   {Array.isArray(actionData.warnings) && actionData.warnings.length > 0 && (
                     <div className="status statusWarn">{actionData.warnings.join(" | ")}</div>
+                  )}
+                  {isSimulatedExecution && (
+                    <div className="status statusInfo">Execution is simulated</div>
                   )}
 
                   <div className="proposalSection">
@@ -650,6 +687,9 @@ export default function Home() {
                         </button>
                       </>
                     )}
+                    <button className="ocm__btn" onClick={() => void refreshCurrentAction()} disabled={busy !== "none"}>
+                      {busy === "refresh" ? "Refreshing..." : "Refresh action state"}
+                    </button>
                     <button className="ocm__btn" onClick={() => void executeAction()} disabled={busy !== "none" || !canExecute}>
                       {busy === "execute" ? "Executing..." : "Execute (simulated)"}
                     </button>
@@ -667,13 +707,19 @@ export default function Home() {
                 <div className="empty">No audit events yet.</div>
               ) : (
                 <div className="list">
-                  {auditItems.map((event) => (
-                    <div key={event.id} className="item">
+                  {auditItems.map((event, index) => (
+                    <div key={`${event.ts}-${event.event}-${index}`} className="item">
                       <div className="item__top">
-                        <div className="item__title">{event.type}</div>
+                        <div className="item__title">{event.event}</div>
                         <div className="tag">{formatUtc(event.ts)}</div>
                       </div>
-                      <pre className="snippet">{JSON.stringify(event.payload, null, 2)}</pre>
+                      {event.actionId && (
+                        <div className="meta">
+                          <span className="metaLabel">actionId:</span>
+                          <span className="mono">{event.actionId}</span>
+                        </div>
+                      )}
+                      <pre className="snippet">{JSON.stringify(event.data, null, 2)}</pre>
                     </div>
                   ))}
                 </div>
