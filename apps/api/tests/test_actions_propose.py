@@ -61,6 +61,9 @@ class ActionsProposeTests(unittest.TestCase):
         self.assertIn("plan", payload)
         self.assertIn("gate", payload)
         self.assertIn("status", payload)
+        self.assertIn("decision", payload["gate"])
+        self.assertIn("reason", payload["gate"])
+        self.assertIn(payload["gate"]["decision"], {"REQUIRES_APPROVAL", "AUTO_APPROVED"})
 
     def test_propose_with_search_returning_dict_results(self):
         search_payload = {
@@ -101,6 +104,8 @@ class ActionsProposeTests(unittest.TestCase):
         payload = response.json()
         self._assert_evidence_contract(payload["evidence"])
         self.assertGreaterEqual(len(payload["evidence"]), 1)
+        self.assertIn("decision", payload["gate"])
+        self.assertIn("reason", payload["gate"])
 
 
 if __name__ == "__main__":

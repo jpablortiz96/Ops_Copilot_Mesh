@@ -153,6 +153,23 @@ def planner_agent(incident: str, evidence: List[Dict], category: str) -> Dict:
     }
 
 def decision_gate(role: str, plan: Dict) -> Dict:
-    # HITL gate: acciones “sensibles” requieren rol alto
-    required_role = "supervisor" if plan.get("requiresApproval") else "operator"
-    return {"requiredRole": required_role, "requesterRole": role, "allowedToAutoExecute": role in ["manager", "supervisor"] and required_role != "manager"}
+    # HITL gate: medium-risk plans require manager/sre-lead approval.
+    normalized_role = str(role or "").strip().lower()
+    requires_approval = bool(plan.get("requiresApproval", True))
+
+    if requires_approval:
+        return {
+            "decision": "REQUIRES_APPROVAL",
+            "reason": "Plan risk requires manager or sre-lead approval before execution.",
+            "requiredRole": "manager",
+            "requesterRole": normalized_role,
+            "allowedToAutoExecute": False,
+        }
+
+    return {
+        "decision": "AUTO_APPROVED",
+        "reason": "Plan risk is low; execution can proceed without manual approval.",
+        "requiredRole": "operator",
+        "requesterRole": normalized_role,
+        "allowedToAutoExecute": True,
+    }

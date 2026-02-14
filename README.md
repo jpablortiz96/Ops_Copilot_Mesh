@@ -51,6 +51,9 @@ API_BASE_URL=http://127.0.0.1:8000
 ## Architecture
 TBD
 
+## Demo Script
+See `docs/demo.md` for a 2-minute judge walkthrough.
+
 ## Azure Deploy Runbook (PowerShell)
 Use the helper script to build images in ACR and update both Container Apps:
 
@@ -75,6 +78,27 @@ Notes:
 ```powershell
 az containerapp revision restart -n api-ops-copilot-mesh -g rg-ops-copilot-mesh --revision <ACTIVE_REVISION_NAME>
 az containerapp revision restart -n web-ops-copilot-mesh -g rg-ops-copilot-mesh --revision <ACTIVE_REVISION_NAME>
+```
+
+If `AZURE_SEARCH_INDEX` is missing or empty in the API container app, patch it explicitly:
+
+```powershell
+az containerapp update `
+  -n api-ops-copilot-mesh `
+  -g rg-ops-copilot-mesh `
+  --set-env-vars AZURE_SEARCH_INDEX=ops-sop
+```
+
+### Cloud parity check (required envs)
+
+```powershell
+az containerapp show -n api-ops-copilot-mesh -g rg-ops-copilot-mesh `
+  --query "properties.template.containers[0].env[?name=='AZURE_SEARCH_ENDPOINT' || name=='AZURE_SEARCH_KEY' || name=='AZURE_SEARCH_INDEX' || name=='AZURE_STORAGE_CONNECTION_STRING'].{name:name,value:value,secretRef:secretRef}" `
+  -o table
+
+az containerapp show -n web-ops-copilot-mesh -g rg-ops-copilot-mesh `
+  --query "properties.template.containers[0].env[?name=='API_BASE_URL'].{name:name,value:value}" `
+  -o table
 ```
 
 ## Smoke Tests
@@ -125,6 +149,38 @@ Replace `<WEB_FQDN>` with your deployed web app hostname:
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri "https://<WEB_FQDN>/api/actions/propose" -ContentType "application/json" -Body $payload | ConvertTo-Json -Depth 12
+```
+
+### 3.1) Deployed API direct (Azure Container Apps)
+
+```powershell
+$RG="rg-ops-copilot-mesh"
+$API_APP="api-ops-copilot-mesh"
+$API_FQDN = az containerapp show -n $API_APP -g $RG --query "properties.configuration.ingress.fqdn" -o tsv
+
+$payload = @{ incident="Users report 500 errors after deployment"; role="operator"; top=5 } | ConvertTo-Json -Compress
+$proposed = Invoke-RestMethod -Method Post -Uri "https://$API_FQDN/v1/actions/propose" -ContentType "application/json" -Body $payload
+$actionId = $proposed.id
+
+Invoke-RestMethod -Method Post -Uri "https://$API_FQDN/v1/actions/approve" -ContentType "application/json" -Body (@{ actionId=$actionId; approverRole="manager"; decision="APPROVE"; note="judge demo" } | ConvertTo-Json -Compress) | ConvertTo-Json -Depth 12
+Invoke-RestMethod -Method Post -Uri "https://$API_FQDN/v1/actions/execute" -ContentType "application/json" -Body (@{ actionId=$actionId; executorRole="operator" } | ConvertTo-Json -Compress) | ConvertTo-Json -Depth 12
+Invoke-RestMethod -Method Get -Uri "https://$API_FQDN/v1/audit/recent?limit=20" | ConvertTo-Json -Depth 12
+```
+
+### 3.2) Deployed WEB proxy (Azure Container Apps)
+
+```powershell
+$RG="rg-ops-copilot-mesh"
+$WEB_APP="web-ops-copilot-mesh"
+$WEB_FQDN = az containerapp show -n $WEB_APP -g $RG --query "properties.configuration.ingress.fqdn" -o tsv
+
+$payload = @{ incident="Users report 500 errors after deployment"; role="operator"; top=5 } | ConvertTo-Json -Compress
+$proposed = Invoke-RestMethod -Method Post -Uri "https://$WEB_FQDN/api/actions/propose" -ContentType "application/json" -Body $payload
+$actionId = $proposed.id
+
+Invoke-RestMethod -Method Post -Uri "https://$WEB_FQDN/api/actions/approve" -ContentType "application/json" -Body (@{ actionId=$actionId; approverRole="manager"; decision="APPROVE"; note="judge demo" } | ConvertTo-Json -Compress) | ConvertTo-Json -Depth 12
+Invoke-RestMethod -Method Post -Uri "https://$WEB_FQDN/api/actions/execute" -ContentType "application/json" -Body (@{ actionId=$actionId; executorRole="operator" } | ConvertTo-Json -Compress) | ConvertTo-Json -Depth 12
+Invoke-RestMethod -Method Get -Uri "https://$WEB_FQDN/api/audit/recent?limit=20" | ConvertTo-Json -Depth 12
 ```
 
 Equivalent curl examples:

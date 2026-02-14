@@ -23,10 +23,10 @@ class SopQuery(BaseModel):
 def search_sop(payload: SopQuery):
     try:
         results = sop_search(payload.query, top=payload.top, fail_on_unconfigured=True)
-    except SearchNotConfiguredError:
+    except SearchNotConfiguredError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Search not configured. Set AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_KEY, AZURE_SEARCH_INDEX.",
+            detail=str(exc),
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))

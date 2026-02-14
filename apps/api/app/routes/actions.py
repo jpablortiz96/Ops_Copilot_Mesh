@@ -133,7 +133,7 @@ async def propose(body: ProposeBody):
         try:
             return sop_search(query, top=top, fail_on_unconfigured=True)
         except SearchNotConfiguredError as exc:
-            warning = "Search not configured; evidence empty"
+            warning = f"Search not configured ({str(exc)}); evidence empty"
             if warning not in warnings:
                 warnings.append(warning)
             logger.warning("actions.propose.search_unconfigured message=%s", str(exc))
@@ -171,6 +171,17 @@ async def propose(body: ProposeBody):
 
         gate_raw = await _maybe_await(decision_gate, tri.role, plan)
         gate = _as_dict(gate_raw, "decision_gate")
+        if plan.get("requiresApproval"):
+            gate.setdefault("decision", "REQUIRES_APPROVAL")
+            gate.setdefault("reason", "Plan requires explicit approval before execution.")
+            gate.setdefault("requiredRole", "manager")
+            gate.setdefault("allowedToAutoExecute", False)
+        else:
+            gate.setdefault("decision", "AUTO_APPROVED")
+            gate.setdefault("reason", "Plan can be executed without manual approval.")
+            gate.setdefault("requiredRole", "operator")
+            gate.setdefault("allowedToAutoExecute", True)
+        gate.setdefault("requesterRole", tri.role)
 
         action_id = str(uuid.uuid4())
         action = {
@@ -204,7 +215,7 @@ async def propose(body: ProposeBody):
         if _is_search_not_configured(exc):
             # We already degrade to empty evidence in safe_search, this is fallback safety.
             logger.warning("actions.propose.runtime_search_unconfigured", exc_info=True)
-            raise HTTPException(status_code=503, detail="Search not configured")
+            raise HTTPException(status_code=503, detail=f"Search not configured: {exc}")
         raise HTTPException(status_code=502, detail=str(exc))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))

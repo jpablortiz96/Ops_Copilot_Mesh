@@ -32,6 +32,8 @@ type ActionPlan = {
 };
 
 type ActionGate = {
+  decision?: string;
+  reason?: string;
   requiredRole?: string;
   requesterRole?: string;
   allowedToAutoExecute?: boolean;
@@ -107,6 +109,12 @@ function formatUtc(dateIso: string) {
 function extractErrorMessage(payload: unknown, fallback: string): string {
   const err = safeJson<ApiError>(payload);
   return err?.error ?? err?.detail ?? fallback;
+}
+
+function riskPillClass(risk: string | undefined): string {
+  if (risk === "medium" || risk === "high") return "pill riskMedium";
+  if (risk === "low") return "pill riskLow";
+  return "pill";
 }
 
 export default function Home() {
@@ -537,7 +545,8 @@ export default function Home() {
                   <div className="proposalHead">
                     <span className="pill strong">{actionData.status}</span>
                     <span className="pill">{actionData.category}</span>
-                    <span className="pill">gate: {actionData.gate.requiredRole ?? "n/a"}</span>
+                    <span className={riskPillClass(actionData.plan.risk)}>risk: {actionData.plan.risk ?? "unknown"}</span>
+                    <span className="pill">gate: {actionData.gate.decision ?? "n/a"}</span>
                   </div>
 
                   <div className="proposalMeta">
@@ -556,11 +565,36 @@ export default function Home() {
                   )}
 
                   <div className="proposalSection">
+                    <h3>Evidence First</h3>
+                    {Array.isArray(actionData.evidence) && actionData.evidence.length > 0 ? (
+                      <div className="list">
+                        {actionData.evidence.map((item) => (
+                          <div key={item.id} className="item">
+                            <div className="item__top">
+                              <div className="item__title">{item.title || item.id}</div>
+                              <div className={`tag ${isBlob(item.source) ? "blob" : "demo"}`}>
+                                {isBlob(item.source) ? "UPLOADED" : "INDEXED"}
+                              </div>
+                            </div>
+                            <div className="meta">
+                              <span>score={Number(item.score ?? 0).toFixed(3)}</span>
+                              <span className="sepDot">|</span>
+                              <span className="mono">{item.source}</span>
+                            </div>
+                            <pre className="snippet">{item.snippet}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty">No evidence returned.</div>
+                    )}
+                  </div>
+
+                  <div className="proposalSection">
                     <h3>Plan</h3>
                     <div className="planMeta">
-                      <span>risk: {actionData.plan.risk ?? "unknown"}</span>
                       <span>requiresApproval: {String(Boolean(actionData.plan.requiresApproval))}</span>
-                      <span>allowedToAutoExecute: {String(Boolean(actionData.gate.allowedToAutoExecute))}</span>
+                      <span>steps: {Array.isArray(actionData.plan.steps) ? actionData.plan.steps.length : 0}</span>
                     </div>
 
                     {Array.isArray(actionData.plan.steps) && actionData.plan.steps.length > 0 ? (
@@ -572,6 +606,29 @@ export default function Home() {
                     ) : (
                       <div className="empty">No plan steps returned.</div>
                     )}
+                  </div>
+
+                  <div className="proposalSection">
+                    <h3>Decision Gate</h3>
+                    <div className="gateGrid">
+                      <div className="gateRow">
+                        <span className="metaLabel">Decision:</span>
+                        <span>{actionData.gate.decision ?? "n/a"}</span>
+                      </div>
+                      <div className="gateRow">
+                        <span className="metaLabel">Required role:</span>
+                        <span>{actionData.gate.requiredRole ?? "n/a"}</span>
+                      </div>
+                      <div className="gateRow">
+                        <span className="metaLabel">Requester role:</span>
+                        <span>{actionData.gate.requesterRole ?? actionData.requesterRole}</span>
+                      </div>
+                      <div className="gateRow">
+                        <span className="metaLabel">Auto execute:</span>
+                        <span>{String(Boolean(actionData.gate.allowedToAutoExecute))}</span>
+                      </div>
+                    </div>
+                    <p className="gateReason">{actionData.gate.reason ?? "No gate rationale returned."}</p>
                   </div>
 
                   <div className="proposalActions">
@@ -596,32 +653,6 @@ export default function Home() {
                     <button className="ocm__btn" onClick={() => void executeAction()} disabled={busy !== "none" || !canExecute}>
                       {busy === "execute" ? "Executing..." : "Execute (simulated)"}
                     </button>
-                  </div>
-
-                  <div className="proposalSection">
-                    <h3>Evidence</h3>
-                    {Array.isArray(actionData.evidence) && actionData.evidence.length > 0 ? (
-                      <div className="list">
-                        {actionData.evidence.map((item) => (
-                          <div key={item.id} className="item">
-                            <div className="item__top">
-                              <div className="item__title">{item.title || item.id}</div>
-                              <div className={`tag ${isBlob(item.source) ? "blob" : "demo"}`}>
-                                {isBlob(item.source) ? "UPLOADED" : "INDEXED"}
-                              </div>
-                            </div>
-                            <div className="meta">
-                              <span>score={Number(item.score ?? 0).toFixed(3)}</span>
-                              <span className="sepDot">|</span>
-                              <span className="mono">{item.source}</span>
-                            </div>
-                            <pre className="snippet">{item.snippet}</pre>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="empty">No evidence returned.</div>
-                    )}
                   </div>
                 </div>
               )}

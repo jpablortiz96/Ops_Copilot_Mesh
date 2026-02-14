@@ -190,6 +190,14 @@ body {
   background: rgba(103,190,217,.18);
   color: rgba(255,255,255,.95);
 }
+.pill.riskLow{
+  border-color: rgba(45,212,191,.35);
+  background: rgba(45,212,191,.12);
+}
+.pill.riskMedium{
+  border-color: rgba(250,204,21,.35);
+  background: rgba(250,204,21,.14);
+}
 .mutedBox{
   margin-top: 10px;
   padding: 12px;
@@ -234,6 +242,22 @@ body {
 .proposalSection h3{
   margin: 0 0 8px;
   font-size: 14px;
+}
+.gateGrid{
+  display: grid;
+  gap: 8px;
+}
+.gateRow{
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.gateReason{
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: rgba(255,255,255,.76);
 }
 .planMeta{
   display: flex;

@@ -12,17 +12,24 @@ class SearchNotConfiguredError(RuntimeError):
     pass
 
 
-def _env(name: str) -> str:
-    v = os.getenv(name, "").strip()
-    if not v:
-        raise SearchNotConfiguredError(f"{name} missing")
-    return v
-
-
 def _resolve_config() -> Tuple[str, str, str]:
-    endpoint = _env("AZURE_SEARCH_ENDPOINT").rstrip("/")
-    key = _env("AZURE_SEARCH_KEY")
+    endpoint = os.getenv("AZURE_SEARCH_ENDPOINT", "").strip()
+    key = os.getenv("AZURE_SEARCH_KEY", "").strip()
     index = os.getenv("AZURE_SEARCH_INDEX", "").strip() or "ops-sop"
+
+    missing: List[str] = []
+    if not endpoint:
+        missing.append("AZURE_SEARCH_ENDPOINT")
+    if not key:
+        missing.append("AZURE_SEARCH_KEY")
+    if not index:
+        missing.append("AZURE_SEARCH_INDEX")
+
+    if missing:
+        missing_text = ", ".join(missing)
+        raise SearchNotConfiguredError(f"Missing required search env vars: {missing_text}")
+
+    endpoint = endpoint.rstrip("/")
     return endpoint, key, index
 
 
